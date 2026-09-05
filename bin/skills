@@ -185,7 +185,8 @@ def cmd_use(args):
     for name in args.sets:
         place_set(name, base, args.link)
     write_exclude(base)
-    if args.link:
+    if args.link and not ROOT.resolve().is_relative_to(base.resolve()):
+        # リンク先がプロジェクト外だと Claude Code は Read 時に権限で弾く。repo 自身に張る場合は不要。
         print(f"note: --link で Claude Code に references/ を読ませるには ~/.claude/settings.json の\n"
               f"      permissions.additionalDirectories に {ROOT} を追加する")
 
