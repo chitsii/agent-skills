@@ -7,6 +7,7 @@
   skills list                                利用可能なセットとスキル
   skills sync                                git pull → 壊れたものを掃除 → 配置済みセットを更新
   skills doctor [--claude]                   両ツールが実際に認識しているか検証
+  skills init <template> [dir]               templates/<template>/ をリポジトリの雛形として展開する
 
 既定はコピー。プロジェクト内に実体があるので、どの環境でも設定変更なしで動く。
 --link は symlink。編集が即反映されるが、Claude Code が references/ を読むには
@@ -24,6 +25,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent  # ~/.local/bin/skills の symlink を辿って repo root
 SETS = ROOT / "sets"
+TEMPLATES = ROOT / "templates"
 # 両ツールの探索パス (docs/research.md §2)。~/.codex/skills は Codex が .system/ を書く場所なので使わない。
 SUBDIRS = (".claude/skills", ".agents/skills")
 MARKER = ".agent-skills.json"  # コピーしたスキル dir に置く。由来のセットと内容ハッシュ
@@ -223,6 +225,52 @@ def cmd_list(args):
         for sk in skills_in(SETS / s):
             fm = frontmatter(sk / "SKILL.md")
             print(f"  {sk.name:<24} {fm.get('description', '')[:90]}")
+    tpls = list_templates()
+    if tpls:
+        print("templates:")
+        for t in tpls:
+            meta = template_manifest(t)
+            print(f"  {t:<24} {meta.get('source', '')[:90]}")
+
+
+def list_templates():
+    if not TEMPLATES.is_dir():
+        return []
+    return sorted(p.name for p in TEMPLATES.iterdir() if p.is_dir() and not p.name.startswith("."))
+
+
+def template_manifest(name):
+    p = TEMPLATES / f"{name}.json"
+    return json.loads(p.read_text()) if p.exists() else {}
+
+
+def cmd_init(args):
+    """templates/<name>/ を dst にコピーする。既存ファイルは上書きしない。
+    templates/<name>.json の post_init を dst で順に実行する。"""
+    tpl = TEMPLATES / args.template
+    if not tpl.is_dir():
+        die(f"unknown template: {args.template}  (available: {', '.join(list_templates()) or 'none'})")
+    meta = template_manifest(args.template)
+    dst = Path(args.dir).resolve() if args.dir else Path.cwd()
+    dst.mkdir(parents=True, exist_ok=True)
+    copied = skipped = 0
+    for src in sorted(tpl.rglob("*")):
+        out = dst / src.relative_to(tpl)
+        if src.is_dir():
+            out.mkdir(exist_ok=True)
+        elif out.exists():
+            skipped += 1
+        else:
+            shutil.copy2(src, out)
+            copied += 1
+    print(f"copied {copied} files into {dst}" + (f" (skipped {skipped} existing)" if skipped else ""), flush=True)
+    for cmd in meta.get("post_init", []):
+        print(f"$ {cmd}", flush=True)
+        r = subprocess.run(cmd, shell=True, cwd=dst)
+        if r.returncode != 0:
+            die(f"post_init failed: {cmd}")
+    if meta.get("next"):
+        print(meta["next"])
 
 
 def cmd_sync(args):
@@ -286,9 +334,9 @@ def cmd_doctor(args):
         for r in roots:
             print(f"  {r}")
         missing = sorted(expected - set(names))
-        print(f"codex sees: {', '.join(sorted(set(names) & expected)) or '(none of ours)'}")
+        print(f"codex lists: {', '.join(names) or '(none)'}")
         if missing:
-            print(f"codex MISSING: {', '.join(missing)}")
+            print(f"codex MISSING (placed by skills): {', '.join(missing)}")
     else:
         print("codex: not installed")
 
@@ -319,6 +367,10 @@ def main():
     sp.add_parser("status").set_defaults(fn=cmd_status)
     sp.add_parser("list").set_defaults(fn=cmd_list)
     sp.add_parser("sync").set_defaults(fn=cmd_sync)
+    ini = sp.add_parser("init")
+    ini.add_argument("template")
+    ini.add_argument("dir", nargs="?")
+    ini.set_defaults(fn=cmd_init)
     dr = sp.add_parser("doctor")
     dr.add_argument("--claude", action="store_true")
     dr.set_defaults(fn=cmd_doctor)

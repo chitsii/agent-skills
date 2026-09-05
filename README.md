@@ -46,6 +46,10 @@ skills doctor                   # 両ツールが実際に認識しているか�
 skills sync                     # git pull → 壊れたものを掃除 → 配置済みセットを更新
 skills drop fiction             # 外す
 skills use engineering --global # 全プロジェクト共通で常設したいとき
+
+mkdir my-novel && cd my-novel && git init
+skills init novel               # 作品リポジトリを雛形から展開し、初期化と監査まで行う
+skills use fiction              # 必要なら sepia を重ねる
 ```
 
 `skills use` はリポジトリのどのサブディレクトリから実行しても git toplevel に配置する。
@@ -60,6 +64,7 @@ git 管理外のディレクトリではカレントディレクトリに配置�
 | 状況 | やること |
 |---|---|
 | 新しいリポジトリで作業を始める | `skills use <set>` |
+| 小説の作品リポジトリを新しく作る | `skills init novel` → `MANUAL.md` を読む |
 | スキルを追加・変更・削除した | 配置しているリポジトリで `skills sync`（`skills status` が STALE を教えてくれる） |
 | 別の端末で最新にしたい | `skills sync`（`git pull` を含む） |
 | 発火しない | `skills doctor` → Codex の認識を確認。Claude Code はセッション内で `/skills` か `/skill-doctor` |
@@ -91,10 +96,24 @@ agent-skills/
 ├── vendor/                 参考にした他者のスキルの原本（有効化しない）
 │   ├── README.md
 │   └── VENDOR.tsv          出典台帳
+├── templates/
+│   ├── novel/              作品リポジトリの雛形（鳴島悠希 novel-Standard 26年8月版をそのまま）
+│   └── novel.json          出典と、展開後に実行する初期化コマンド
 └── docs/research.md        探索パス・symlink・frontmatter 互換の調査記録
 ```
 
 `sets/<set>/` 直下の、`SKILL.md` を持つディレクトリだけがスキルとして扱われる。
+
+`templates/<name>/` はリポジトリの雛形で、`skills init <name>` がカレントに展開する。既存ファイルは上書きしない。
+展開後に `templates/<name>.json` の `post_init` を順に実行する。雛形の中にスキルが同梱されていれば、そのまま
+両ツールの探索パスに入る（`skills use` は使わない。同梱スキルは `scripts/` や `guidelines/` と一体で動くため）。
+
+`templates/novel/` は再配布の許諾を確認中のため、いまはリポジトリに含めていない（`.gitignore`）。
+
+novel 雛形の注意:
+
+- `scripts/check.sh` は GNU grep（`grep -P`）を使う。macOS は `brew install grep` の上で `fish_add_path /opt/homebrew/opt/grep/libexec/gnubin`
+- 雛形の `scripts/audit-repo.py` は `.claude/skills/` 配下の全スキルに frontmatter が `name` と `description` だけであることを要求する。`skills use fiction` などで別セットを重ねると、その監査が FAIL になる。重ねるなら監査の FAIL はその分だけと割り切るか、重ねない
 
 ## スキルを追加する
 
@@ -151,4 +170,4 @@ Claude Code のセッション内では `/skill-doctor` で各スキルのコン
 
 ## ライセンス
 
-MIT。`vendor/` 内の各原本はそれぞれのライセンスに従う。
+MIT。`vendor/` 内の各原本はそれぞれのライセンスに従う。土台にした公開物と作者は [CREDITS.md](CREDITS.md) にまとめてある。

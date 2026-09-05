@@ -1,0 +1,9 @@
+{
+  "source": "鳴島悠希 novel-Standard 26年8月版 (MANIFEST: 2026-08-06, commit 96e95fe). https://note.com/x2775co/n/n63437e236269",
+  "post_init": [
+    "chmod +x scripts/*.sh",
+    "bash scripts/init-work.sh",
+    "python3 scripts/audit-repo.py"
+  ],
+  "next": "次に読むもの: MANUAL.md（運用手順の正本）。執筆前に world-bible/、work/character-sheet-*.md、work/pov-plan.md、work/plot.md を埋めて凍結する（MANUAL.md 第4節）。"
+}
