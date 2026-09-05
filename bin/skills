@@ -1,0 +1,264 @@
+#!/usr/bin/env python3
+"""skills — スキルセットを Claude Code / Codex CLI の探索パスへ symlink で張る。
+
+  skills use  <set>... [--global]   セットを張る (既定: カレントの git リポジトリ)
+  skills drop <set>... [--global]   セットを外す
+  skills status                     ここと global に何が張られているか
+  skills list                       利用可能なセットとスキル
+  skills sync                       git pull + 壊れたリンクの掃除 + 使用中セットの張り直し
+  skills doctor [--claude]          両ツールが実際に認識しているか検証
+
+symlink はこの repo 内を絶対パスで指す。repo を git pull すれば内容は即反映される。
+"""
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent  # ~/.local/bin/skills の symlink を辿って repo root
+SETS = ROOT / "sets"
+# 両ツールの探索パス (README §2 で実測確定)。~/.codex/skills は Codex が .system/ を書く場所なので使わない。
+SUBDIRS = (".claude/skills", ".agents/skills")
+MARK_BEGIN = "# >>> agent-skills >>>"
+MARK_END = "# <<< agent-skills <<<"
+
+
+def die(msg):
+    print(f"error: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def git_toplevel(path=None):
+    r = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=path, capture_output=True, text=True)
+    return Path(r.stdout.strip()) if r.returncode == 0 else None
+
+
+def project_base():
+    return git_toplevel() or Path.cwd()
+
+
+def list_sets():
+    if not SETS.is_dir():
+        return []
+    return sorted(p.name for p in SETS.iterdir() if p.is_dir() and not p.name.startswith("."))
+
+
+def set_dir(name):
+    d = SETS / name
+    if not d.is_dir():
+        die(f"unknown set: {name}  (available: {', '.join(list_sets()) or 'none'})")
+    return d
+
+
+def skills_in(set_path):
+    return sorted(p for p in set_path.iterdir() if p.is_dir() and (p / "SKILL.md").exists())
+
+
+def frontmatter(skill_md):
+    """name/description 程度の単純な frontmatter だけ読む (pyyaml 非依存)。"""
+    m = re.match(r"---\n(.*?)\n---", skill_md.read_text(encoding="utf-8"), re.S)
+    fm = {}
+    if m:
+        for line in m.group(1).splitlines():
+            if line[:1].isspace():
+                continue
+            k, sep, v = line.partition(":")
+            if sep:
+                fm[k.strip()] = v.strip().strip('"').strip("'")
+    return fm
+
+
+def owned_links(target_dir):
+    """target_dir 内の symlink のうち sets/ を指すもの -> [(link, set_name, dest)]"""
+    out = []
+    if not target_dir.is_dir():
+        return out
+    for link in sorted(target_dir.iterdir()):
+        if not link.is_symlink():
+            continue
+        dest = Path(os.readlink(link))
+        try:
+            rel = dest.relative_to(SETS)
+        except ValueError:
+            continue
+        out.append((link, rel.parts[0], dest))
+    return out
+
+
+def write_exclude(base):
+    """.git/info/exclude に、この repo が張ったリンクだけを列挙したブロックを書く。
+    共有の .gitignore は触らない。base が git toplevel でなければ何もしない。"""
+    top = git_toplevel(base)
+    if not top or top.resolve() != base.resolve():
+        return
+    excl = top / ".git" / "info" / "exclude"
+    excl.parent.mkdir(parents=True, exist_ok=True)
+    lines = excl.read_text().splitlines() if excl.exists() else []
+    if MARK_BEGIN in lines and MARK_END in lines:
+        i, j = lines.index(MARK_BEGIN), lines.index(MARK_END)
+        lines = lines[:i] + lines[j + 1 :]
+    entries = [f"{sub}/{link.name}" for sub in SUBDIRS for link, _, _ in owned_links(base / sub)]
+    if entries:
+        lines += [MARK_BEGIN, *entries, MARK_END]
+    excl.write_text("\n".join(lines).rstrip("\n") + "\n")
+
+
+def link_set(name, base):
+    skills = skills_in(set_dir(name))
+    if not skills:
+        print(f"note: set '{name}' has no skills yet")
+    for skill in skills:
+        for sub in SUBDIRS:
+            dst = base / sub
+            dst.mkdir(parents=True, exist_ok=True)
+            link = dst / skill.name
+            if link.is_symlink():
+                link.unlink()
+            elif link.exists():
+                print(f"skip  {link}  (実体が存在)")
+                continue
+            link.symlink_to(skill)
+            print(f"link  {link}  ->  {skill.relative_to(ROOT)}")
+
+
+def cmd_use(args):
+    base = Path.home() if args.glob else project_base()
+    for name in args.sets:
+        link_set(name, base)
+    write_exclude(base)
+
+
+def cmd_drop(args):
+    base = Path.home() if args.glob else project_base()
+    for sub in SUBDIRS:
+        for link, set_name, _ in owned_links(base / sub):
+            if set_name in args.sets:
+                link.unlink()
+                print(f"unlink  {link}")
+    write_exclude(base)
+
+
+def cmd_status(args):
+    for label, base in (("project", project_base()), ("global", Path.home())):
+        print(f"[{label}] {base}")
+        found = False
+        for sub in SUBDIRS:
+            for link, set_name, _ in owned_links(base / sub):
+                found = True
+                flag = "" if link.exists() else "  (BROKEN)"
+                print(f"  {sub}/{link.name:<24} <- {set_name}{flag}")
+        if not found:
+            print("  (none)")
+
+
+def cmd_list(args):
+    sets = list_sets()
+    if not sets:
+        print("(no sets)")
+    for s in sets:
+        print(f"{s}/")
+        for sk in skills_in(SETS / s):
+            fm = frontmatter(sk / "SKILL.md")
+            print(f"  {sk.name:<24} {fm.get('description', '')[:90]}")
+
+
+def cmd_sync(args):
+    has_upstream = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--abbrev-ref", "@{u}"],
+                                  capture_output=True).returncode == 0
+    if has_upstream:
+        subprocess.run(["git", "-C", str(ROOT), "pull", "--ff-only"], check=False)
+    else:
+        print(f"note: {ROOT} has no upstream, skip pull")
+    bases = list(dict.fromkeys([project_base(), Path.home()]))
+    for base in bases:
+        in_use = set()
+        for sub in SUBDIRS:
+            for link, set_name, _ in owned_links(base / sub):
+                if not link.exists():
+                    link.unlink()
+                    print(f"clean  {link}")
+                in_use.add(set_name)
+        for s in sorted(in_use):
+            if (SETS / s).is_dir():
+                link_set(s, base)
+        write_exclude(base)
+
+
+def codex_view(cwd):
+    """codex debug prompt-input から Codex が実際に見ているスキルルートと名前を取る (API 呼び出しなし)。"""
+    r = subprocess.run(["codex", "debug", "prompt-input"], capture_output=True, text=True, cwd=cwd)
+    block = ""
+    try:
+        for item in json.loads(r.stdout):
+            for c in item.get("content", []) if isinstance(item, dict) else []:
+                t = c.get("text", "") if isinstance(c, dict) else ""
+                if "<skills_instructions>" in t:
+                    block = t
+    except json.JSONDecodeError:
+        block = r.stdout.replace("\\n", "\n")
+    roots = re.findall(r"- `r\d+` = `([^`]+)`", block)
+    names = re.findall(r"^- ([A-Za-z0-9_.-]+):", block, re.M)
+    return roots, names
+
+
+def cmd_doctor(args):
+    base = project_base()
+    expected = set()
+    broken = 0
+    for b in (base, Path.home()):
+        for sub in SUBDIRS:
+            for link, _, dest in owned_links(b / sub):
+                expected.add(link.name)
+                if not link.exists():
+                    broken += 1
+                    print(f"BROKEN  {link} -> {dest}")
+    print(f"links: {'ok' if not broken else f'{broken} broken'}  ({len(expected)} skills linked)")
+
+    if shutil.which("codex"):
+        roots, names = codex_view(base)
+        print("codex roots:")
+        for r in roots:
+            print(f"  {r}")
+        missing = sorted(expected - set(names))
+        print(f"codex sees: {', '.join(sorted(set(names) & expected)) or '(none of ours)'}")
+        if missing:
+            print(f"codex MISSING: {', '.join(missing)}")
+    else:
+        print("codex: not installed")
+
+    if args.claude and shutil.which("claude"):
+        prompt = "List the names of every skill available to you, one per line, nothing else."
+        r = subprocess.run(["claude", "--model", "haiku", "-p", prompt], capture_output=True, text=True, cwd=base)
+        seen = set(re.findall(r"[A-Za-z0-9_.-]+", r.stdout))
+        missing = sorted(expected - seen)
+        print(f"claude sees: {', '.join(sorted(seen & expected)) or '(none of ours)'}")
+        if missing:
+            print(f"claude MISSING: {', '.join(missing)}")
+    else:
+        print("claude: セッション内で /skills か /skill-doctor で確認 (--claude で haiku に1回問い合わせて検証)")
+
+
+def main():
+    p = argparse.ArgumentParser(prog="skills", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sp = p.add_subparsers(dest="cmd", required=True)
+    for name, fn in (("use", cmd_use), ("drop", cmd_drop)):
+        q = sp.add_parser(name)
+        q.add_argument("sets", nargs="+")
+        q.add_argument("--global", dest="glob", action="store_true")
+        q.set_defaults(fn=fn)
+    sp.add_parser("status").set_defaults(fn=cmd_status)
+    sp.add_parser("list").set_defaults(fn=cmd_list)
+    sp.add_parser("sync").set_defaults(fn=cmd_sync)
+    d = sp.add_parser("doctor")
+    d.add_argument("--claude", action="store_true")
+    d.set_defaults(fn=cmd_doctor)
+    args = p.parse_args()
+    args.fn(args)
+
+
+if __name__ == "__main__":
+    main()
