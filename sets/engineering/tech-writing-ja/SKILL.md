@@ -113,11 +113,10 @@ Source: Kohl, The Global English Style Guide (SAS Press). Guideline text fetched
 
 The four layers above are about structure, address, load, and ambiguity. They transfer. The surface rules do not, so when the document is Japanese, add these, read on demand:
 
-- [references/japanese/writing-constitution.md](references/japanese/writing-constitution.md): twelve rules applied before drafting. Conclusion first, headings that carry the point, prose for cause and effect, bold once, deliberate unevenness, no template repeated three times, labeled uncertainty, sources for facts and "筆者は" for opinions.
 - [references/japanese/readability-principles.md](references/japanese/readability-principles.md): word order (long modifiers first), where the comma goes, one idea per sentence around 50-60 characters, subject close to predicate.
 - [references/japanese/forbidden-patterns.md](references/japanese/forbidden-patterns.md) and [references/japanese/translationese.md](references/japanese/translationese.md): the Japanese counterpart of unslop. Stock phrases and syntax that reads as translated English.
 
-These come from a business-writing skill. Apply the sentence-level rules everywhere; apply the document-level rules (headings as conclusions, So What endings) only where the Diátaxis mode allows opinion.
+These come from a business-writing skill; the document-level rules there duplicate the layers above, so only the sentence-level material is bundled.
 
 If `suiko` is installed, run it on the finished text and sort each finding into "fixed" or "kept on purpose (reason)". Do not install it just for this.
 
