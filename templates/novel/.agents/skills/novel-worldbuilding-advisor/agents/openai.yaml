@@ -1,0 +1,4 @@
+interface:
+  display_name: "小説世界観相談"
+  short_description: "文化・技術・物流を整合的で物語に使える世界観として具体化"
+  default_prompt: "$novel-worldbuilding-advisor で物語に使える整合的な世界観を設計してください。"

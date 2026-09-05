@@ -1,0 +1,4 @@
+interface:
+  display_name: "エピソード検証"
+  short_description: "既存話を機械検査と正典・視点・時系列の目視照合で総合検証"
+  default_prompt: "$validate-episode で指定した既存話を検査し、問題を根拠付きで報告してください。"

@@ -1,0 +1,4 @@
+interface:
+  display_name: "長編小説オーケストレーター"
+  short_description: "長編の新規話を執筆・検証・正典更新まで一貫して管理"
+  default_prompt: "$long-novel-orchestrator で指定話を執筆から正典更新まで完遂してください。"

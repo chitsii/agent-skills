@@ -1,0 +1,4 @@
+interface:
+  display_name: "Web小説文体"
+  short_description: "設計済みの日本語Web小説を三つの文体モードで執筆"
+  default_prompt: "$narrative-style-web-novel で設計済みの場面を日本語Web小説として執筆してください。"

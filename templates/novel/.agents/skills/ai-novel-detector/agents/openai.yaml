@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI小説文体診断"
+  short_description: "日本語小説の機械的な文体特徴を根拠と優先度つきで診断"
+  default_prompt: "$ai-novel-detector で日本語小説の機械的な文体特徴を診断してください。"

@@ -1,0 +1,19 @@
+# OS・WSL 由来
+*:Zone.Identifier
+.DS_Store
+Thumbs.db
+
+# 一時ファイル
+*.tmp
+*.bak
+~$*
+__pycache__/
+*.pyc
+
+# Claude Code のローカル設定（ユーザー固有・配布しない。一時ファイルも含めて追跡しない）
+.claude/settings.local.json
+.claude/settings.local.json.*
+
+# 受け渡し用ディレクトリの中身は追跡しない（第三者著作物の誤コミット防止）
+user-provided/*
+!user-provided/.gitkeep

@@ -108,7 +108,7 @@ agent-skills/
 展開後に `templates/<name>.json` の `post_init` を順に実行する。雛形の中にスキルが同梱されていれば、そのまま
 両ツールの探索パスに入る（`skills use` は使わない。同梱スキルは `scripts/` や `guidelines/` と一体で動くため）。
 
-`templates/novel/` は再配布の許諾を確認中のため、いまはリポジトリに含めていない（`.gitignore`）。
+`templates/novel/` は鳴島悠希氏の novel-Standard（26年8月版）をそのまま同梱している。クレジット記載を条件に作者の許諾を得ている（[CREDITS.md](CREDITS.md)）。
 
 novel 雛形の注意:
 

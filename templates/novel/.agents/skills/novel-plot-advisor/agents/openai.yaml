@@ -1,0 +1,4 @@
+interface:
+  display_name: "小説プロット相談"
+  short_description: "最新の市場情報を作品固有の読者への約束とプロット設計へ翻訳"
+  default_prompt: "$novel-plot-advisor で作品の核を守りながらプロットを相談してください。"

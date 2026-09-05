@@ -1,0 +1,6 @@
+# novel-Standard 共通設定。信頼済みリポジトリでのみ読み込まれる。
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+# 投稿サイトや市場動向を扱う相談Skillでは、時点付きの最新情報を確認する。
+web_search = "live"

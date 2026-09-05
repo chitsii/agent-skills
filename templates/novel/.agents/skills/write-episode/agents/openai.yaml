@@ -1,0 +1,4 @@
+interface:
+  display_name: "エピソード執筆"
+  short_description: "一話を設計確認から本文執筆・検証・正典と台帳更新まで完遂"
+  default_prompt: "$write-episode で指定した一話を設計確認から台帳更新まで完遂してください。"

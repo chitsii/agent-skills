@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI文体自然化"
+  short_description: "正典・視点・人物の声を保って日本語小説本文を自然に改稿"
+  default_prompt: "$humanize-ai-writing で日本語小説本文を作品固有の声に沿って改稿してください。"

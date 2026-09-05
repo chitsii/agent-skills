@@ -1,0 +1,8 @@
+novel-Standard 配布パッケージ
+
+生成日時: 2026-08-06 13:47:20 +0900
+生成元コミット: 96e95fe
+同梱スキル: ai-novel-detector humanize-ai-writing long-novel-orchestrator narrative-style-web-novel novel-plot-advisor novel-worldbuilding-advisor validate-episode write-episode
+同梱スクリプト: check.sh chars.sh init-work.sh normalize_blanklines.py repeat_check.py vocab_check.py cliche_check.py metaphor_sweep.py state_check.py audit-repo.py
+
+使い方は MANUAL.md を読む。
