@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""skills — スキルセットを Claude Code / Codex CLI の探索パスへ symlink で張る。
+"""skills — スキルセットを Claude Code / Codex CLI の探索パスへ配置する。
 
-  skills use  <set>... [--global]   セットを張る (既定: カレントの git リポジトリ)
-  skills drop <set>... [--global]   セットを外す
-  skills status                     ここと global に何が張られているか
-  skills list                       利用可能なセットとスキル
-  skills sync                       git pull + 壊れたリンクの掃除 + 使用中セットの張り直し
-  skills doctor [--claude]          両ツールが実際に認識しているか検証
+  skills use  <set>... [--global] [--link]   セットを配置する (既定: カレントの git リポジトリ)
+  skills drop <set>... [--global]            セットを外す
+  skills status                              ここと global に何が配置されているか (古いコピーは STALE)
+  skills list                                利用可能なセットとスキル
+  skills sync                                git pull → 壊れたものを掃除 → 配置済みセットを更新
+  skills doctor [--claude]                   両ツールが実際に認識しているか検証
 
-symlink はこの repo 内を絶対パスで指す。repo を git pull すれば内容は即反映される。
+既定はコピー。プロジェクト内に実体があるので、どの環境でも設定変更なしで動く。
+--link は symlink。編集が即反映されるが、Claude Code が references/ を読むには
+~/.claude/settings.json の permissions.additionalDirectories にこの repo が必要。
 """
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -21,8 +24,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent  # ~/.local/bin/skills の symlink を辿って repo root
 SETS = ROOT / "sets"
-# 両ツールの探索パス (README §2 で実測確定)。~/.codex/skills は Codex が .system/ を書く場所なので使わない。
+# 両ツールの探索パス (docs/research.md §2)。~/.codex/skills は Codex が .system/ を書く場所なので使わない。
 SUBDIRS = (".claude/skills", ".agents/skills")
+MARKER = ".agent-skills.json"  # コピーしたスキル dir に置く。由来のセットと内容ハッシュ
 MARK_BEGIN = "# >>> agent-skills >>>"
 MARK_END = "# <<< agent-skills <<<"
 
@@ -72,25 +76,61 @@ def frontmatter(skill_md):
     return fm
 
 
-def owned_links(target_dir):
-    """target_dir 内の symlink のうち sets/ を指すもの -> [(link, set_name, dest)]"""
+def content_hash(d):
+    h = hashlib.sha256()
+    for f in sorted(p for p in d.rglob("*") if p.is_file() and p.name != MARKER):
+        h.update(str(f.relative_to(d)).encode())
+        h.update(f.read_bytes())
+    return h.hexdigest()[:16]
+
+
+class Entry:
+    """配置済みスキル一つ。mode は 'copy' か 'link'。"""
+
+    def __init__(self, path, set_name, mode):
+        self.path, self.set_name, self.mode = path, set_name, mode
+        self.source = SETS / set_name / path.name
+
+    @property
+    def broken(self):
+        return not self.source.exists() or (self.mode == "link" and not self.path.exists())
+
+    @property
+    def stale(self):
+        if self.mode != "copy" or self.broken:
+            return False
+        return content_hash(self.path) != content_hash(self.source)
+
+    def remove(self):
+        if self.path.is_symlink():
+            self.path.unlink()
+        else:
+            shutil.rmtree(self.path)
+
+
+def owned_entries(target_dir):
+    """target_dir 内で、この repo が配置したもの (sets/ への symlink か MARKER 付きの dir)。"""
     out = []
     if not target_dir.is_dir():
         return out
-    for link in sorted(target_dir.iterdir()):
-        if not link.is_symlink():
-            continue
-        dest = Path(os.readlink(link))
-        try:
-            rel = dest.relative_to(SETS)
-        except ValueError:
-            continue
-        out.append((link, rel.parts[0], dest))
+    for p in sorted(target_dir.iterdir()):
+        if p.is_symlink():
+            try:
+                rel = Path(os.readlink(p)).relative_to(SETS)
+            except ValueError:
+                continue
+            out.append(Entry(p, rel.parts[0], "link"))
+        elif p.is_dir() and (p / MARKER).exists():
+            try:
+                meta = json.loads((p / MARKER).read_text())
+                out.append(Entry(p, meta["set"], "copy"))
+            except (json.JSONDecodeError, KeyError):
+                continue
     return out
 
 
 def write_exclude(base):
-    """.git/info/exclude に、この repo が張ったリンクだけを列挙したブロックを書く。
+    """.git/info/exclude に、この repo が配置したものだけを列挙したブロックを書く。
     共有の .gitignore は触らない。base が git toplevel でなければ何もしない。"""
     top = git_toplevel(base)
     if not top or top.resolve() != base.resolve():
@@ -101,44 +141,62 @@ def write_exclude(base):
     if MARK_BEGIN in lines and MARK_END in lines:
         i, j = lines.index(MARK_BEGIN), lines.index(MARK_END)
         lines = lines[:i] + lines[j + 1 :]
-    entries = [f"{sub}/{link.name}" for sub in SUBDIRS for link, _, _ in owned_links(base / sub)]
+    entries = [f"{sub}/{e.path.name}" for sub in SUBDIRS for e in owned_entries(base / sub)]
     if entries:
         lines += [MARK_BEGIN, *entries, MARK_END]
     excl.write_text("\n".join(lines).rstrip("\n") + "\n")
 
 
-def link_set(name, base):
+def place(skill, dst_dir, set_name, link):
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    target = dst_dir / skill.name
+    if target.is_symlink():
+        target.unlink()
+    elif target.is_dir():
+        if (target / MARKER).exists():
+            shutil.rmtree(target)
+        else:
+            print(f"skip  {target}  (この repo 由来でない実体が存在)")
+            return
+    elif target.exists():
+        print(f"skip  {target}  (ファイルが存在)")
+        return
+    if link:
+        target.symlink_to(skill)
+        print(f"link  {target}  ->  {skill.relative_to(ROOT)}")
+    else:
+        shutil.copytree(skill, target)
+        meta = {"set": set_name, "hash": content_hash(skill), "source": str(ROOT)}
+        (target / MARKER).write_text(json.dumps(meta) + "\n")
+        print(f"copy  {target}  <-  {skill.relative_to(ROOT)}")
+
+
+def place_set(name, base, link):
     skills = skills_in(set_dir(name))
     if not skills:
         print(f"note: set '{name}' has no skills yet")
     for skill in skills:
         for sub in SUBDIRS:
-            dst = base / sub
-            dst.mkdir(parents=True, exist_ok=True)
-            link = dst / skill.name
-            if link.is_symlink():
-                link.unlink()
-            elif link.exists():
-                print(f"skip  {link}  (実体が存在)")
-                continue
-            link.symlink_to(skill)
-            print(f"link  {link}  ->  {skill.relative_to(ROOT)}")
+            place(skill, base / sub, name, link)
 
 
 def cmd_use(args):
     base = Path.home() if args.glob else project_base()
     for name in args.sets:
-        link_set(name, base)
+        place_set(name, base, args.link)
     write_exclude(base)
+    if args.link:
+        print(f"note: --link で Claude Code に references/ を読ませるには ~/.claude/settings.json の\n"
+              f"      permissions.additionalDirectories に {ROOT} を追加する")
 
 
 def cmd_drop(args):
     base = Path.home() if args.glob else project_base()
     for sub in SUBDIRS:
-        for link, set_name, _ in owned_links(base / sub):
-            if set_name in args.sets:
-                link.unlink()
-                print(f"unlink  {link}")
+        for e in owned_entries(base / sub):
+            if e.set_name in args.sets:
+                e.remove()
+                print(f"remove  {e.path}")
     write_exclude(base)
 
 
@@ -147,10 +205,10 @@ def cmd_status(args):
         print(f"[{label}] {base}")
         found = False
         for sub in SUBDIRS:
-            for link, set_name, _ in owned_links(base / sub):
+            for e in owned_entries(base / sub):
                 found = True
-                flag = "" if link.exists() else "  (BROKEN)"
-                print(f"  {sub}/{link.name:<24} <- {set_name}{flag}")
+                flag = "  (BROKEN)" if e.broken else "  (STALE: skills sync で更新)" if e.stale else ""
+                print(f"  {sub}/{e.path.name:<24} <- {e.set_name} [{e.mode}]{flag}")
         if not found:
             print("  (none)")
 
@@ -173,18 +231,18 @@ def cmd_sync(args):
         subprocess.run(["git", "-C", str(ROOT), "pull", "--ff-only"], check=False)
     else:
         print(f"note: {ROOT} has no upstream, skip pull")
-    bases = list(dict.fromkeys([project_base(), Path.home()]))
-    for base in bases:
-        in_use = set()
+    for base in dict.fromkeys([project_base(), Path.home()]):
+        in_use = {}  # set_name -> mode
         for sub in SUBDIRS:
-            for link, set_name, _ in owned_links(base / sub):
-                if not link.exists():
-                    link.unlink()
-                    print(f"clean  {link}")
-                in_use.add(set_name)
-        for s in sorted(in_use):
+            for e in owned_entries(base / sub):
+                if e.broken:
+                    e.remove()
+                    print(f"clean  {e.path}")
+                    continue
+                in_use.setdefault(e.set_name, e.mode)
+        for s, mode in sorted(in_use.items()):
             if (SETS / s).is_dir():
-                link_set(s, base)
+                place_set(s, base, link=(mode == "link"))
         write_exclude(base)
 
 
@@ -208,15 +266,18 @@ def codex_view(cwd):
 def cmd_doctor(args):
     base = project_base()
     expected = set()
-    broken = 0
+    problems = 0
     for b in (base, Path.home()):
         for sub in SUBDIRS:
-            for link, _, dest in owned_links(b / sub):
-                expected.add(link.name)
-                if not link.exists():
-                    broken += 1
-                    print(f"BROKEN  {link} -> {dest}")
-    print(f"links: {'ok' if not broken else f'{broken} broken'}  ({len(expected)} skills linked)")
+            for e in owned_entries(b / sub):
+                expected.add(e.path.name)
+                if e.broken:
+                    problems += 1
+                    print(f"BROKEN  {e.path}")
+                elif e.stale:
+                    problems += 1
+                    print(f"STALE   {e.path}  (skills sync)")
+    print(f"placed: {len(expected)} skills, {'ok' if not problems else f'{problems} problems'}")
 
     if shutil.which("codex"):
         roots, names = codex_view(base)
@@ -245,17 +306,21 @@ def cmd_doctor(args):
 def main():
     p = argparse.ArgumentParser(prog="skills", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sp = p.add_subparsers(dest="cmd", required=True)
-    for name, fn in (("use", cmd_use), ("drop", cmd_drop)):
-        q = sp.add_parser(name)
-        q.add_argument("sets", nargs="+")
-        q.add_argument("--global", dest="glob", action="store_true")
-        q.set_defaults(fn=fn)
+    u = sp.add_parser("use")
+    u.add_argument("sets", nargs="+")
+    u.add_argument("--global", dest="glob", action="store_true")
+    u.add_argument("--link", action="store_true", help="コピーではなく symlink で配置")
+    u.set_defaults(fn=cmd_use)
+    d = sp.add_parser("drop")
+    d.add_argument("sets", nargs="+")
+    d.add_argument("--global", dest="glob", action="store_true")
+    d.set_defaults(fn=cmd_drop)
     sp.add_parser("status").set_defaults(fn=cmd_status)
     sp.add_parser("list").set_defaults(fn=cmd_list)
     sp.add_parser("sync").set_defaults(fn=cmd_sync)
-    d = sp.add_parser("doctor")
-    d.add_argument("--claude", action="store_true")
-    d.set_defaults(fn=cmd_doctor)
+    dr = sp.add_parser("doctor")
+    dr.add_argument("--claude", action="store_true")
+    dr.set_defaults(fn=cmd_doctor)
     args = p.parse_args()
     args.fn(args)
 

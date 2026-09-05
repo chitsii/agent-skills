@@ -1,7 +1,7 @@
 # agent-skills
 
 Claude Code と Codex CLI で共用する、自分用の Agent Skills。
-このリポジトリを唯一の正として、`skills` コマンドが両ツールの探索パスへ symlink を張る。
+このリポジトリを唯一の正として、`skills` コマンドが両ツールの探索パスへスキルを配置する。
 
 **方針**
 
@@ -35,29 +35,32 @@ cd ~/programming/projects/skills && ./install.sh
 
 ```bash
 cd ~/projects/my-rust-cli
-skills use engineering          # このリポジトリに engineering セットを張る
+skills use engineering          # このリポジトリに engineering セットを配置する
 
 cd ~/projects/my-novel
 skills use fiction              # こちらには fiction
 
-skills status                   # ここと global に何が張られているか
+skills status                   # ここと global に何が配置されているか (古いコピーは STALE)
 skills list                     # 利用可能なセットとスキル（description つき）
 skills doctor                   # 両ツールが実際に認識しているか検証
-skills sync                     # git pull → 壊れたリンクを掃除 → 使用中セットを張り直す
+skills sync                     # git pull → 壊れたものを掃除 → 配置済みセットを更新
 skills drop fiction             # 外す
 skills use engineering --global # 全プロジェクト共通で常設したいとき
 ```
 
-`skills use` はリポジトリのどのサブディレクトリから実行しても git toplevel に張る。
-git 管理外のディレクトリではカレントディレクトリに張る。
+`skills use` はリポジトリのどのサブディレクトリから実行しても git toplevel に配置する。
+git 管理外のディレクトリではカレントディレクトリに配置する。
+
+既定は**コピー**。プロジェクト内に実体があるので、グローバル設定を一切触らずにどの環境でも動く。
+`--link` を付けると symlink になり編集が即反映されるが、Claude Code がスキルの `references/` を読むには
+`~/.claude/settings.json` の `permissions.additionalDirectories` にこのリポジトリを足す必要がある（下記「仕組み」）。
 
 ### 日々の運用
 
 | 状況 | やること |
 |---|---|
 | 新しいリポジトリで作業を始める | `skills use <set>` |
-| スキルの本文を直した | 何もしない（symlink なので即反映） |
-| スキルを追加・削除した | 張っているリポジトリで `skills sync`（または `skills use <set>` を再実行） |
+| スキルを追加・変更・削除した | 配置しているリポジトリで `skills sync`（`skills status` が STALE を教えてくれる） |
 | 別の端末で最新にしたい | `skills sync`（`git pull` を含む） |
 | 発火しない | `skills doctor` → Codex の認識を確認。Claude Code はセッション内で `/skills` か `/skill-doctor` |
 
@@ -65,13 +68,14 @@ git 管理外のディレクトリではカレントディレクトリに張る�
 
 ```
 ~/.local/bin/skills  ─symlink→  <repo>/bin/skills          ← 自分の realpath から repo を特定
-<project>/.claude/skills/<name>  ─symlink→  <repo>/sets/<set>/<name>   ← Claude Code
-<project>/.agents/skills/<name>  ─symlink→  <repo>/sets/<set>/<name>   ← Codex CLI
+<project>/.claude/skills/<name>/   ← <repo>/sets/<set>/<name>/ のコピー   (Claude Code)
+<project>/.agents/skills/<name>/   ← 同上                                 (Codex CLI)
 ```
 
-- 探索パスは実測で確定したもの（[docs/research.md §2](docs/research.md)）。**`~/.codex/skills` は使わない**。Codex が起動時に `.system/` を書き込む場所なので、symlink で汚染される
-- project スコープでは張ったリンク名を `.git/info/exclude` に書く。共有の `.gitignore` は触らない
-- symlink の先はこのリポジトリ内なので、`git pull` した瞬間に全リンク先が更新される
+- 探索パスは実測で確定したもの（[docs/research.md §2](docs/research.md)）。**`~/.codex/skills` は使わない**。Codex が起動時に `.system/` を書き込む場所
+- コピーした各スキル dir に `.agent-skills.json`（由来のセットと内容ハッシュ）を置く。`status` / `sync` はこれで自分が配置したものを見分け、元と違えば STALE と報告する
+- project スコープでは配置したスキル名を `.git/info/exclude` に書く。共有の `.gitignore` は触らない
+- symlink を既定にしない理由: Claude Code は `Read` 時に symlink を実体に解決し、プロジェクト外なら権限で弾く。SKILL.md 本体はハーネスが読むので動くが、`references/` が読めない。回避には `additionalDirectories` へのグローバル設定変更が要り、それを前提にしたくない
 
 ## リポジトリ構成
 
@@ -142,7 +146,8 @@ Claude Code のセッション内では `/skill-doctor` で各スキルのコン
 
 - Claude Code はスキル一覧にコンテキスト窓の 1% を割り当て、超えると使用頻度の低いスキルから description を落とす（設定 `skillListingBudgetFraction`）。セットを分けているのはこのためというより、無関係なスキルの誤発火を防ぐため
 - Codex にはスキル単位の無効化設定がない。両ツール共通で効くのは物理配置だけ
-- `skills sync` の張り直しは global とカレントのプロジェクトだけが対象。他のプロジェクトはそこで `skills sync` を実行する
+- `skills sync` の更新は global とカレントのプロジェクトだけが対象。他のプロジェクトはそこで `skills sync` を実行する
+- コピーした側を直接編集しない。次の `sync` で上書きされる。直すのは `sets/`
 
 ## ライセンス
 

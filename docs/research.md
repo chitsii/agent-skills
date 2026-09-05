@@ -118,6 +118,14 @@ Codex は起動時に **`~/.codex/skills/.system/` へ自前のシステムス�
 `~/.claude/skills` 自体を symlink に差し替えた場合も認識された。
 現行の[公式ドキュメント](https://code.claude.com/docs/en/skills)にも symlink 追従が明記されている。
 
+### 追記: symlink 越しの `references/` は Claude Code が読めない（実測）
+
+スキル dir が symlink だと SKILL.md 本体はハーネスが読むので発火するが、本文から
+`references/*.md` を `Read` すると Claude Code が symlink を実体に解決し、プロジェクト外として
+権限で弾く（`-p` では拒否、対話では毎回プロンプト）。`permissions.additionalDirectories` に
+repo を足せば通るが、グローバル設定の変更を前提にすることになる。
+→ **既定はコピーに変更**（`bin/skills` の `place()`）。symlink は `--link` で opt-in。
+
 **それでも「スキル単位リンク」を採用する理由**: 壊れた前科があるのはルートごと
 symlink のほう。将来のリグレッションに対して脆いのが分かっているので、
 そちらは避けておく。加えてスキル単位なら、共有スキルとツール固有スキルを
